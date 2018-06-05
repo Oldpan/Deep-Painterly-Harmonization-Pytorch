@@ -82,8 +82,8 @@ def imshow(tensor, title=None):
 
 
 def save_image(tensor, **para):
-    num = 11
-    dir = 'results_{}'.format(num)
+    num = 12
+    dir = 'results_all/results_{}'.format(num)
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
     image = unloader(image)
@@ -95,11 +95,11 @@ def save_image(tensor, **para):
 
 
 print('===> Loaing datasets')
-style_image = image_loader("datasets/5_target.jpg")
-content_image = image_loader("datasets/5_naive.jpg")
-mask_image = image_loader('datasets/5_c_mask_dilated.jpg')[:, 0:1, :, :]
+style_image = image_loader("datasets/0_target.jpg")
+content_image = image_loader("datasets/0_naive.jpg")
+mask_image = image_loader('datasets/0_c_mask_dilated.jpg')[:, 0:1, :, :]
 mask_image_ori = mask_image.clone()
-tmask_image = Image.open('datasets/5_c_mask.jpg').convert('RGB')
+tmask_image = Image.open('datasets/0_c_mask.jpg').convert('RGB')
 tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
 tmask_image = PIL_to_tensor(tmask_image)
 tmask_image_ori = tmask_image.clone()
@@ -245,8 +245,8 @@ if __name__ == '__main__':
     since = time.time()
     output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
                                     content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-                                    num_steps=1000,
-                                    style_weight=1850, content_weight=8, tv_weight=0, lr=0.5)
+                                    num_steps=1100,
+                                    style_weight=220, content_weight=8, tv_weight=0, lr=0.5)
     time_elapsed = time.time() - since
     print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 

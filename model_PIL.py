@@ -10,13 +10,17 @@ import torch.nn.functional as F
 from PIL import Image, ImageFilter
 import matplotlib.pyplot as plt
 
+import cuda_utils._ext.cuda_util as cu
 import torchvision.transforms as transforms
+
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+
 
 device = torch.device("cuda:0")
 
-content_layers_default = ['conv_4']
-style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6',' conv_7']
-
+content_layers_default = ['conv_4']  # conv_4
+style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
 
 
 class Normalization(nn.Module):
@@ -58,6 +62,17 @@ def imshow(tensor, title=None):
     if title is not None:
         plt.title(title)
     plt.pause(0.001)  # pause a bit so that plots are updated
+
+
+def test_show(tensor):
+    c = tensor_to_PIL(tensor).convert('L')
+    image_array = np.array(c)
+    plt.subplot(2, 1, 1)
+    plt.imshow(c, cmap=cm.gray)
+    plt.axis("off")
+    plt.subplot(2, 1, 2)
+    plt.hist(image_array.flatten(), 256)  # flatten可以将矩阵转化成一维序列
+    plt.show()
 
 
 def gram_matrix(input):
@@ -230,7 +245,7 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
             model.add_module(name, nn.ReLU(inplace=False))
 
         if name in content_layers:
-            print('-----Setting up content layer-----')
+            print('-----Setting up content {} layer-----'.format(name))
             target = model(content_img).clone()
 
             content_loss = ContentLoss(target, mask_image, content_weight)
@@ -239,17 +254,48 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
             content_losses.append(content_loss)
 
         if name in style_layers:
-            print('-----Setting up style layer-----')
-            # content_target = model(content_img).detach()
+            print('-----Setting up style {} layer-----'.format(name))
 
-            target_feature = model(style_img).clone()
+            if name in []:
 
-            mask = mask_image.clone()
-            mask = mask.expand_as(target_feature)
-            target_feature = target_feature * mask
+                input_feature = model(content_img).clone()
+                input_feature = input_feature.squeeze(0)
 
-            # add a histogram match here
-            style_loss = StyleLoss(target_feature, mask_image, style_weight)
+                target_feature = model(style_img).clone()
+
+                # imshow(target_feature[:,4:7,:,:], title='target_feature')
+                # test_show(target_feature[:,4:7,:,:])
+
+                mask = mask_image.clone()
+                mask = mask.expand_as(target_feature)
+
+                target_feature = target_feature.squeeze(0)
+                match = input_feature.clone()
+                #
+                # plt.figure()
+                # match = match.unsqueeze(0)
+                # imshow(match[:,4:7,:,:], title='match before')
+                # test_show(match[:, 4:7, :, :])
+                # match = match.squeeze(0)
+
+                cu.patchmatch_r(input_feature, target_feature, match, 3, 1)
+
+                plt.figure()
+                match = match.unsqueeze(0)
+                # imshow(match[:,4:7,:,:], title='match after')
+                # test_show(match[:, 4:7, :, :])
+
+                match = match * mask
+                style_loss = StyleLoss(match, mask_image, style_weight)
+
+            else:
+
+                target_feature = model(style_img).clone()
+                mask = mask_image.clone()
+                mask = mask.expand_as(target_feature)
+                target_feature = target_feature * mask
+                style_loss = StyleLoss(target_feature, mask_image, style_weight)
+
             style_loss.register_backward_hook(style_loss.style_hook)
             model.add_module("style_loss" + str(i), style_loss)
             style_losses.append(style_loss)
