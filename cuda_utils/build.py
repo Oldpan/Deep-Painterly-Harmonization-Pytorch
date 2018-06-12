@@ -17,7 +17,6 @@ if torch.cuda.is_available():
     with_cuda = True
 
 this_file = os.path.dirname(os.path.realpath(__file__))
-# print(this_file)
 extra_objects = ['src/cuda_util_kernel.cu.o']
 extra_objects = [os.path.join(this_file, fname) for fname in extra_objects]
 

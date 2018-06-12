@@ -259,26 +259,14 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
             if name in ['relu_5', 'relu_9', 'relu_13']:
 
                 input_feature = model(content_img).clone()
-                input_feature = input_feature.squeeze(0)
-
                 target_feature = model(style_img).clone()
 
                 mask = mask_image.clone()
                 mask = mask.expand_as(target_feature)
 
-                target_feature = target_feature.squeeze(0)
                 match = input_feature.clone()
-                #
-                # plt.figure()
-                # match = match.unsqueeze(0)
-                # imshow(match[:,4:7,:,:], title='match before')
-                # test_show(match[:, 4:7, :, :])
-                # match = match.squeeze(0)
 
                 cu.patchmatch_r(input_feature, target_feature, match, 3, 1)
-
-                plt.figure()
-                match = match.unsqueeze(0)
 
                 match = match * mask
                 style_loss = StyleLoss(match, mask_image, style_weight)

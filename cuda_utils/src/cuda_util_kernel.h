@@ -59,11 +59,11 @@ __global__ void upsample_corr_kernel(
 
 int patchmatch_r_conv_kernel_L(float *input, float *target, float *conv,
                                 int patch, int stride,
-                                int c1, int h1, int w1, int h2, int w2);
+                                int c1, int h1, int w1, int h2, int w2, cudaStream_t stream);
 
 int patchmatch_r_argmax_kernel_L(
 	float *conv, float *target, float *match, int *correspondence,
-	int c1, int h1, int w1, int h2, int w2
+	int c1, int h1, int w1, int h2, int w2, cudaStream_t stream
 );
 
 
@@ -95,6 +95,11 @@ int histogram_kernel_L(
 	float *I, float *minI, float *maxI, float *mask,
 	int nbins, int c, int h, int w, float *hist
 );
+
+
+int add_L(int *a, int *b, int *output,int N);
+__global__ void add(int *a, int *b, int *output);
+
 
 
 #ifdef __cplusplus

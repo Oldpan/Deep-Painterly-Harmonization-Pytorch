@@ -451,6 +451,13 @@ __global__ void Ring2_kernel(
 	return ;
 }
 
+__global__ void add(int *a, int *b, int *output)
+{
+    int i = threadIdx.x;
+    output[i] = a[i] + b[i];
+
+    return;
+}
 
 /*------------------------.cu and .c interface-----------------------------*/
 int upsample_corr_kernel_L(int *curr_corrAB, int *next_corrAB,
@@ -504,6 +511,8 @@ int patchmatch_conv_kernel_L(float *input, float *target, float *conv,
 int patchmatch_argmax_kernel_L(float* conv, int* correspondence,int patch,
                                 int c1, int h1, int w1, int h2, int w2)
 {
+	cudaError_t err;
+
     patchmatch_argmax_kernel<<<(h1*w1-1)/TB+1, TB>>>(
 		conv,
 		correspondence,
@@ -526,11 +535,14 @@ int patchmatch_argmax_kernel_L(float* conv, int* correspondence,int patch,
 
 int patchmatch_r_conv_kernel_L(float *input, float *target, float *conv,
                                 int patch, int stride,
-                                int c1, int h1, int w1, int h2, int w2)
+                                int c1, int h1, int w1, int h2, int w2,
+                                cudaStream_t stream)
 {
 	int N = h1*w1*h2*w2;
 
-	patchmatch_r_conv_kernel<<<(N-1)/TB+1, TB>>>(
+	cudaError_t err;
+
+	patchmatch_r_conv_kernel<<<(N-1)/TB+1, TB, 0, stream>>>(
 		input,
 		target,
 		conv,
@@ -540,16 +552,25 @@ int patchmatch_r_conv_kernel_L(float *input, float *target, float *conv,
 		h2, w2
 	);
 
+	err = cudaGetLastError();
+    if(cudaSuccess != err)
+    {
+        fprintf( stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+
     return 1;
 }
 
 
 int patchmatch_r_argmax_kernel_L(
 	float *conv, float *target, float *match, int *correspondence,
-	int c1, int h1, int w1, int h2, int w2
+	int c1, int h1, int w1, int h2, int w2, cudaStream_t stream
 )
 {
-	patchmatch_r_argmax_kernel<<<(h1*w1-1)/TB+1, TB>>>(
+	cudaError_t err;
+
+	patchmatch_r_argmax_kernel<<<(h1*w1-1)/TB+1, TB, 0, stream>>>(
 		conv,
 		target,
 		match,
@@ -558,6 +579,13 @@ int patchmatch_r_argmax_kernel_L(
 		h1, w1,
 		h2, w2
 	);
+
+	err = cudaGetLastError();
+    if(cudaSuccess != err)
+    {
+        fprintf( stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString( err ) );
+        exit( -1 );
+    }
 
 	return 1;
 
@@ -620,6 +648,19 @@ int histogram_kernel_L(
 		nbins, c, h, w,
 		hist
 	);
+
+    return 1;
+}
+
+
+int add_L(int *a, int *b, int *output,int N)
+{
+
+    add<<<1,N>>>(
+    a,
+    b,
+    output
+    );
 
     return 1;
 }

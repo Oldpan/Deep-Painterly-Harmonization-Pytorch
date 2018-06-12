@@ -120,19 +120,19 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 
 
 int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
-                THCudaTensor* match, int patch, int stride)
+                THCudaTensor* output, int patch, int stride)
 {
-    float *input_ = THCudaTensor_data(state, input);
-    float *target_ = THCudaTensor_data(state, target);
-    float *match_ = THCudaTensor_data(state, match);
+    float *input_features = THCudaTensor_data(state, input);
+    float *target_features = THCudaTensor_data(state, target);
+    float *match = THCudaTensor_data(state, output);
 
-    int c1 = THCudaTensor_size(state, input, 0);
-	int h1 = THCudaTensor_size(state, input, 1);
-	int w1 = THCudaTensor_size(state, input, 2);
+    int c1 = THCudaTensor_size(state, input, 1);
+	int h1 = THCudaTensor_size(state, input, 2);
+	int w1 = THCudaTensor_size(state, input, 3);
 
-	int c2 = THCudaTensor_size(state, target, 0);
-	int h2 = THCudaTensor_size(state, target, 1);
-	int w2 = THCudaTensor_size(state, target, 2);
+	int c2 = THCudaTensor_size(state, target, 1);
+	int h2 = THCudaTensor_size(state, target, 2);
+	int w2 = THCudaTensor_size(state, target, 3);
 
     THCudaTensor *conv = THCudaTensor_new(state);
     THCudaTensor_resize2d(state, conv, h1*w1, h2*w2);
@@ -140,32 +140,34 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
 
     assert(c1 == c2);
 
+    cudaStream_t stream = THCState_getCurrentStream(state);
+
 	patchmatch_r_conv_kernel_L(
-	    input_,
-		target_,
+	    input_features,
+		target_features,
 		THCudaTensor_data(state, conv),
 		patch, stride,
 		c1,
 		h1, w1,
-		h2, w2
+		h2, w2,
+		stream
 		);
 
-//  THCudaTensor *match = new_tensor_like(state, input);
-
-//	THCudaTensor_zero(state, match_);
 	THCudaIntTensor *correspondence = THCudaIntTensor_new(state);
 	THCudaIntTensor_resize3d(state, correspondence, h1, w1, 2);
 	THCudaIntTensor_zero(state, correspondence);
 
+    stream = THCState_getCurrentStream(state);
 
 	patchmatch_r_argmax_kernel_L(
 		THCudaTensor_data(state, conv),
-		target_,
-		match_,
+		target_features,
+		match,
 		THCudaIntTensor_data(state, correspondence),
 		c1,
 		h1, w1,
-		h2, w2
+		h2, w2,
+		stream
 	);
 
     THCudaTensor_free(state, conv);
@@ -249,4 +251,24 @@ int histogram(THCudaTensor *I, int nbins, THCudaTensor *minI, THCudaTensor *maxI
 	);
 
 	return 1;
+}
+
+int my_add(THCudaIntTensor* a, THCudaIntTensor *b, THCudaIntTensor *c)
+{
+    int n = THCudaIntTensor_size(state, a, 0);
+
+    int *aa = THCudaIntTensor_data(state, a);
+    int *bb = THCudaIntTensor_data(state, b);
+    int *cc = THCudaIntTensor_data(state, c);
+
+//    cudaStream_t stream = THCState_getCurrentStream(state);
+
+    add_L(
+    THCudaIntTensor_data(state, a),
+    THCudaIntTensor_data(state, b),
+    THCudaIntTensor_data(state, c),
+    n
+    );
+
+    return 1;
 }

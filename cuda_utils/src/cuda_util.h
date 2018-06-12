@@ -17,3 +17,5 @@ int hist_remap2(THCudaTensor *I, int nI, THCudaTensor *mI, THCudaTensor *histJ, 
 
 int histogram(THCudaTensor *I, int nbins, THCudaTensor *minI, THCudaTensor *maxI,
               THCudaTensor *mask, THCudaTensor *hist);
+
+int my_add(THCudaIntTensor* a, THCudaIntTensor *b, THCudaIntTensor *c);

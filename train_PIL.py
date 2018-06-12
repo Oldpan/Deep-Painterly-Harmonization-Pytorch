@@ -233,21 +233,21 @@ if __name__ == '__main__':
                      5000, 10000, 50000, 100000, 500000, 1000000]
     content_weights = [1, 5, 10, 100]
 
-    style_weights_rd = list(np.random.randint(100, 200, size=20))
-    content_weights_rd = list(np.random.randint(4, 9, size=5))
+    style_weights_rd = list(np.random.randint(4000, 7000, size=20))
+    content_weights_rd = list(np.random.randint(1, 10, size=5))
 
-    # for i in range(len(content_weights_rd)):
-    #     for j in range(len(style_weights_rd)):
-    #         output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
-    #                                         content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-    #                                         style_weight=int(style_weights_rd[j]), content_weight=int(content_weights_rd[i]), lr=1)
+    for i in range(len(content_weights_rd)):
+        for j in range(len(style_weights_rd)):
+            output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
+                                            content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
+                                            style_weight=int(style_weights_rd[j]), content_weight=int(content_weights_rd[i]), lr=1)
 
-    since = time.time()
-    output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
-                                    content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-                                    num_steps=1000,
-                                    style_weight=1000000, content_weight=50, tv_weight=0, lr=0.1)
-    time_elapsed = time.time() - since
-    print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    # since = time.time()
+    # output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
+    #                                 content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
+    #                                 num_steps=1000,
+    #                                 style_weight=200, content_weight=7, tv_weight=0, lr=1)
+    # time_elapsed = time.time() - since
+    # print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
     pass
