@@ -2,7 +2,9 @@ import math
 import copy
 import argparse
 import os
+import gc
 import time
+import inspect
 import os.path as osp
 
 import torch
@@ -10,12 +12,16 @@ import cv2
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+
 import cuda_utils._ext.cuda_util as cu
 from PIL import Image, ImageFilter
 import torch.optim as optim
 from torchvision import models
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
+from data_utils.print_mem_use import gpu_profile
+
+from data_utils.modelsize_estimate import modelsize
 
 parser = argparse.ArgumentParser(description='DeepFake-Pytorch')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
@@ -28,6 +34,10 @@ parser.add_argument('--seed', type=int, default=222, metavar='S',
                     help='random seed (default: 222)')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
+
+# fram = inspect.currentframe()
+# a = gpu_profile(fram, 'line')
+# a(fram, 'line')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -45,10 +55,10 @@ else:
 
 device = torch.device("cuda:0" if args.cuda else "cpu")
 
-content_layers_default = ['conv_4']
-style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
-layers = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
-hist_layers = ['conv_3', 'conv_6']
+content_layers_default = ['conv_9']
+style_layers_default = ['conv_1', 'conv_3', 'conv_5', 'conv_9']
+layers = ['conv_1', 'conv_3', 'conv_5', 'conv_9']
+hist_layers = ['conv_1', 'conv_9']
 
 style_weight = 200
 content_weight = 8
@@ -80,6 +90,14 @@ def tensor_to_PIL(tensor):
     return image
 
 
+def pack_to_cu(tensor):
+    tensor.squeeze_(0)
+
+
+def unpack(tensor):
+    tensor.unsqueeze_(0)
+
+
 def imshow(tensor, title=None):
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
@@ -91,7 +109,7 @@ def imshow(tensor, title=None):
 
 
 def save_image(tensor, **para):
-    num = 12
+    num = 14
     dir = 'results_all/results_{}'.format(num)
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
@@ -106,6 +124,7 @@ def save_image(tensor, **para):
 print('===> Loaing datasets')
 style_image = image_loader("datasets/0_target.jpg")
 content_image = image_loader("datasets/0_cmn.jpg")
+# 这里注意 [:,0:1,:,:] 和 [:,1:,:,:] 的区别
 mask_image = image_loader('datasets/0_c_mask_dilated.jpg')[:, 0:1, :, :]
 mask_image_ori = mask_image.clone()
 tmask_image = Image.open('datasets/0_c_mask.jpg').convert('RGB')
@@ -113,6 +132,7 @@ tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
 tmask_image = PIL_to_tensor(tmask_image)
 tmask_image_ori = tmask_image.clone()
 
+# a(fram, 'line')
 cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
 cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
 
@@ -134,8 +154,9 @@ def normalize_features(tensor):
     _, c, h, w = tensor.size()
     print('Normalizing feature map with dim3[tensor] = ', c, h, w)
     x2 = torch.pow(tensor, 2)
-    sum_x2 = torch.sum(x2, 0)
-    dis_x2 = torch.sqrt(sum_x2.expand_as(tensor))
+    sum_x2 = torch.sum(x2, 1)
+    dis_x2 = torch.sqrt(sum_x2)
+    dis_x2 = dis_x2.expand_as(tensor)
     Nx = tensor.div(dis_x2 + 1e-8)
     return Nx
 
@@ -144,7 +165,7 @@ def compute_weightMap(tensor):
     _, c, h, w = tensor.size()
     print('Computing weight map with dim3[tensor] = ', c, h, w)
     x2 = torch.pow(tensor, 2)
-    sum_x2 = torch.sum(x2, 0)[0]
+    sum_x2 = torch.sum(x2, 1)[0]
     sum_min, sum_max = sum_x2.min(), sum_x2.max()
     wMap = (sum_x2 - sum_min) / (sum_max - sum_min + 1e-8)
     return wMap
@@ -226,7 +247,7 @@ class TVLoss(nn.Module):
 
 class HistLoss(nn.Module):
     def __init__(self, strength, input, target, nbins, maskI, maskJ, mask):
-        super(TVLoss, self).__init__()
+        super(HistLoss, self).__init__()
         self.strength = strength
         self.loss = 0
         self.nbins = nbins
@@ -235,18 +256,20 @@ class HistLoss(nn.Module):
 
         _, c, h1, w1 = input.size()
         self.msk = self.maskI.float().expand_as(input)
-        self.msk_sub = torch.ones((1, c, h1, w1)) * (1 - self.msk.float())
+        self.msk_sub = torch.ones((1, c, h1, w1)).to(device) * (1 - self.msk.float())
         self.mask = mask.float().expand_as(input)
 
         self.nJ = maskJ.sum()
+        print(self.nJ)
         _, c, h2, w2 = target.size()
-        mJ = maskJ.expand_as(target)
+
+        mJ = maskJ[:, 0:1, :, :, ].expand_as(target)
         J = target.float()
-        _J = J[mJ].view(-1, c, self.nJ)
+        _J = J[mJ].view(c, self.nJ)
         self.minJ = _J.min(2)
         self.maxJ = _J.max(2)
 
-        self.hisJ = torch.tensor([1])
+        self.hisJ = J.clone()
         cu.histogram(target, self.nbins, self.minJ, self.maxJ, maskJ, self.hisJ)
 
         self.hisJ = self.hisJ * (self.nI / self.nJ)
@@ -308,9 +331,10 @@ target_features = []
 match_features = []
 match_masks = []
 
-feature_extractor = nn.Sequential()
+feature_extractor = nn.Sequential().to(device)
 layerIdx = 0
 
+# a(fram, 'line')
 i = 0
 for layer in cnn.children():
     if layerIdx < len(layers):
@@ -323,22 +347,29 @@ for layer in cnn.children():
             feature_extractor.add_module(name, layer)
         elif isinstance(layer, nn.ReLU):
             name = "relu_" + str(i)
-            feature_extractor.add_module(name, nn.ReLU(inplace=False))
+            feature_extractor.add_module(name, nn.ReLU(inplace=True))
         if name == layers[layerIdx]:
             print('Extracting feature layer')
             input = feature_extractor(content_image).clone()
             target = feature_extractor(style_image).clone()
+            # modelsize(feature_extractor, content_image)
             input_features.append(input)
             target_features.append(target)
             layerIdx += 1
 
-del [feature_extractor]
+# for obj in gc.get_objects():
+#     if torch.is_tensor(obj):
+#         print(type(obj), obj.size())
+
+# a(fram, 'line')
+# torch.cuda.empty_cache()
+
 
 curr_corr, corr = None, None
 curr_mask, mask = None, None
 
 i = len(layers) - 1  # 3 2 1 0
-while i > 0:
+while i >= 0:
     name = layers[i]
     print('Working on patchmatch layer', i, ":", name)
     A = input_features[i].clone()
@@ -353,35 +384,51 @@ while i > 0:
         print("Input and target should have the same dimension! h, h2, w, w2 = ", h, h2, w, w2)
 
     resize = transforms.Resize((h, w))
-    tmask = resize(tensor_to_PIL(torch.gt(tmask_image_ori[:, 0:1, :, :], 0.1)))
+    # 需要修改以防数据格式的错误
+    tmask = resize(tensor_to_PIL(torch.gt(tmask_image_ori[:, 0:1, :, :], 0.01)))
+    tmask = PIL_to_tensor(tmask).int()   # int32
 
-    tmask = PIL_to_tensor(tmask).int()
-
-    if name in ['conv_6']:
-
+    if i == len(layers) - 1:
         print("Initializing NNF in layer ", i, ":", name, "with patch", 3)
         print("Brute-force patch matching...")
-        init_corr = torch.tensor(1)
-        N_A.squeeze(0)
-        N_BP.squeeze(0)
-        cu.patchmatch(N_A, N_BP, init_corr, 3)
+
+        pack_to_cu(N_A)
+        pack_to_cu(N_BP)
+        init_corr = N_A.clone().int()
+        print('N_A', N_A.size())
+        print('N_BP', N_BP.size())
+
+        result = cu.patchmatch(N_A, N_BP, init_corr, 3)
+
+        print('init_corr', init_corr.size())
 
         resize = transforms.Resize((h, w))
         guide = resize(tensor_to_PIL(style_image))
-        guide = PIL_to_tensor(tmask)
+        guide = PIL_to_tensor(guide)
+        print('guide', guide.size())
 
         print("  Refining NNF...")
+        corr = init_corr.clone()   # int32
+        mask = init_corr.clone()   # int32
+        # 因为tmask为 (1,1,xxx,xxx) 要变成 (xxx,xxx)
+        pack_to_cu(tmask)
+        pack_to_cu(tmask)
         cu.refineNNF(N_A, N_BP, init_corr, guide, tmask, corr, 5, 1)
         cu.Ring2(N_A, N_BP, corr, mask, 1, tmask)
 
+        print('corr', corr.size())
+        print('mask', mask.size())
         curr_corr = corr
         curr_mask = mask
+
+        unpack(curr_mask)
 
     else:
         print('Upsampling NNF in layer', i, ':', name)
         cu.upsample_corr(corr, h, w, curr_corr)
-        if isinstance(mask, torch.Tensor):
-            curr_mask = transforms.Resize(tensor_to_PIL(mask), (h, w)).int()
+        curr_mask = resize(tensor_to_PIL(mask.float()))
+        curr_mask = PIL_to_tensor(curr_mask).int()
+        print('curr_mask ',curr_mask.size())
 
     i -= 1
     match_features.append(BP)
@@ -389,11 +436,11 @@ while i > 0:
 
 gram_features, hist_features = [], []
 gram_match_masks, hist_match_masks = [], []
-gramIdx, hisIdx = 1, 1
+gramIdx, hisIdx = 0, 0
 for i in range(len(layers)):
     name = layers[i]
-    features = match_features[-(i - 1)]
-    mask = match_masks[-(i - 1)]
+    features = match_features[len(layers) - i - 1]
+    mask = match_masks[len(layers) - i - 1]
     if gramIdx < len(style_layers_default) or hisIdx < len(hist_layers):
         if name == style_layers_default[gramIdx]:
             gram_features.append(features)
@@ -467,6 +514,7 @@ for layer in cnn.children():
 
         gram_feature = gram_features[next_style_idx]
         gram_mask = gram_match_masks[next_style_idx]
+        print('gram_mask ', gram_mask.size())
         gram_msk = gram_mask.float().expand_as(content_target)
         target_gram = gram_matrix((gram_feature * gram_msk)).clone()
 
@@ -479,8 +527,9 @@ for layer in cnn.children():
 
         if name in hist_layers:
             print('Setting up histogram layer', i, ':', name)
-            maskI = torch.gt(mask_image, 0.1)
-            maskJ = hist_match_masks[next_hist_idx].byte()
+            maskI = torch.gt(mask_image, 0.0001)
+            maskJ = hist_match_masks[next_hist_idx]
+            print(maskJ>0)
             hist_feature = hist_features[next_hist_idx]
             loss_model = HistLoss(hist_weight, content_target, hist_feature, 256, maskI, maskJ, mask_image)
             model.add_module('hist_loss' + str(next_hist_idx), loss_model)
@@ -491,6 +540,8 @@ for i in range(len(model) - 1, -1, -1):
         break
 
     model = model[:i]
+
+pass
 
 
 def run_painterly_transfer(cnn, normalization_mean, normalization_std,

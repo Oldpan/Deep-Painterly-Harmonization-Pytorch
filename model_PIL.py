@@ -19,8 +19,9 @@ import matplotlib.pyplot as plt
 
 device = torch.device("cuda:0")
 
-content_layers_default = ['conv_4']  # conv_4
-style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
+content_layers_default = ['relu_9']  # conv_4
+# style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
+style_layers_default = ['relu_5', 'relu_9', 'relu_13']
 
 
 class Normalization(nn.Module):
@@ -121,7 +122,8 @@ class ContentLoss(nn.Module):
         # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         grad_input_1 = grad_input[0] * self.weight
         grad_input_1 = grad_input_1 * mask
-        grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
+        # grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
+        grad_input = tuple([grad_input_1])
         return grad_input
 
 
@@ -169,12 +171,13 @@ class StyleLoss(nn.Module):
         # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         grad_input_1 = grad_input[0] * self.weight
         grad_input_1 = grad_input_1 * mask
-        grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
+
+        # grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
 
         # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         # grad_input_1 = grad_input_1 * self.weight
         # grad_input_1 = grad_input_1 * mask
-        # grad_input = tuple([grad_input_1])
+        grad_input = tuple([grad_input_1])
         return grad_input
 
 
@@ -234,9 +237,6 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
             mask_image = resize(mask_image)
             mask_image = PIL_to_tensor(mask_image).to(device)
 
-            # plt.figure()
-            # imshow(mask_image, title='resize Image')
-
             name = "pool_" + str(i)
             model.add_module(name, layer)
 
@@ -256,15 +256,12 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
         if name in style_layers:
             print('-----Setting up style {} layer-----'.format(name))
 
-            if name in []:
+            if name in ['relu_5', 'relu_9', 'relu_13']:
 
                 input_feature = model(content_img).clone()
                 input_feature = input_feature.squeeze(0)
 
                 target_feature = model(style_img).clone()
-
-                # imshow(target_feature[:,4:7,:,:], title='target_feature')
-                # test_show(target_feature[:,4:7,:,:])
 
                 mask = mask_image.clone()
                 mask = mask.expand_as(target_feature)
@@ -282,8 +279,6 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
 
                 plt.figure()
                 match = match.unsqueeze(0)
-                # imshow(match[:,4:7,:,:], title='match after')
-                # test_show(match[:, 4:7, :, :])
 
                 match = match * mask
                 style_loss = StyleLoss(match, mask_image, style_weight)

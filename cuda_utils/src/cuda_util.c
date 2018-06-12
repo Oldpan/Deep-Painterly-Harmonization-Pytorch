@@ -78,7 +78,7 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 	int h1 = THCudaTensor_size(state, input, 1);
 	int w1 = THCudaTensor_size(state, input, 2);
 
-//	int c2 = THCudaTensor_size(state, target, 0);
+	int c2 = THCudaTensor_size(state, target, 0);
 	int h2 = THCudaTensor_size(state, target, 1);
 	int w2 = THCudaTensor_size(state, target, 2);
 
@@ -98,14 +98,15 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 		h2, w2
 	);
 
-	correspondence = THCudaIntTensor_new(state);
-	THCudaIntTensor_resize3d(state, correspondence, h1, w1, 2);
+    int *init_corr = THCudaIntTensor_data(state, correspondence);
+//	correspondence = THCudaIntTensor_new(state);
+	THCudaIntTensor_resize3d(state, correspondence, h1, w1, 2);  //** look at the size (h1,w1,2)
 	THCudaIntTensor_zero(state, correspondence);
 
 
     patchmatch_argmax_kernel_L(
     	THCudaTensor_data(state, conv),
-		THCudaIntTensor_data(state, correspondence),
+		init_corr,
 		patch,
 		c1,
 		h1, w1,
@@ -119,13 +120,17 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 
 
 int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
-                THCudaTensor* output, int patch, int stride)
+                THCudaTensor* match, int patch, int stride)
 {
+    float *input_ = THCudaTensor_data(state, input);
+    float *target_ = THCudaTensor_data(state, target);
+    float *match_ = THCudaTensor_data(state, match);
+
     int c1 = THCudaTensor_size(state, input, 0);
 	int h1 = THCudaTensor_size(state, input, 1);
 	int w1 = THCudaTensor_size(state, input, 2);
 
-//	int c2 = THCudaTensor_size(state, target, 0);
+	int c2 = THCudaTensor_size(state, target, 0);
 	int h2 = THCudaTensor_size(state, target, 1);
 	int w2 = THCudaTensor_size(state, target, 2);
 
@@ -136,8 +141,8 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
     assert(c1 == c2);
 
 	patchmatch_r_conv_kernel_L(
-	    THCudaTensor_data(state, input),
-		THCudaTensor_data(state, target),
+	    input_,
+		target_,
 		THCudaTensor_data(state, conv),
 		patch, stride,
 		c1,
@@ -145,9 +150,9 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
 		h2, w2
 		);
 
-//    THCudaTensor *match = new_tensor_like(state, input);
-	THCudaTensor_zero(state, output);
+//  THCudaTensor *match = new_tensor_like(state, input);
 
+//	THCudaTensor_zero(state, match_);
 	THCudaIntTensor *correspondence = THCudaIntTensor_new(state);
 	THCudaIntTensor_resize3d(state, correspondence, h1, w1, 2);
 	THCudaIntTensor_zero(state, correspondence);
@@ -155,8 +160,8 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
 
 	patchmatch_r_argmax_kernel_L(
 		THCudaTensor_data(state, conv),
-		THCudaTensor_data(state, target),
-		THCudaTensor_data(state, output),   // match -> output
+		target_,
+		match_,
 		THCudaIntTensor_data(state, correspondence),
 		c1,
 		h1, w1,

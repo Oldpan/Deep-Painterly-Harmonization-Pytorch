@@ -513,6 +513,13 @@ int patchmatch_argmax_kernel_L(float* conv, int* correspondence,int patch,
 		h2, w2
 	);
 
+	err = cudaGetLastError();
+    if(cudaSuccess != err)
+    {
+        fprintf( stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+
 	return 1;
 }
 

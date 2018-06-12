@@ -82,7 +82,7 @@ def imshow(tensor, title=None):
 
 
 def save_image(tensor, **para):
-    num = 12
+    num = 13
     dir = 'results_all/results_{}'.format(num)
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
@@ -245,8 +245,8 @@ if __name__ == '__main__':
     since = time.time()
     output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
                                     content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-                                    num_steps=1100,
-                                    style_weight=220, content_weight=8, tv_weight=0, lr=0.5)
+                                    num_steps=1000,
+                                    style_weight=1000000, content_weight=50, tv_weight=0, lr=0.1)
     time_elapsed = time.time() - since
     print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
