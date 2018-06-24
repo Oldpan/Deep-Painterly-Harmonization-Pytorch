@@ -508,14 +508,14 @@ int patchmatch_conv_kernel_L(float *input, float *target, float *conv,
     return 1;
 }
 
-int patchmatch_argmax_kernel_L(float* conv, int* correspondence,int patch,
+int patchmatch_argmax_kernel_L(float* conv, int* init_corr,int patch,
                                 int c1, int h1, int w1, int h2, int w2)
 {
 	cudaError_t err;
 
     patchmatch_argmax_kernel<<<(h1*w1-1)/TB+1, TB>>>(
 		conv,
-		correspondence,
+		init_corr,
 		patch,
 		c1,
 		h1, w1,

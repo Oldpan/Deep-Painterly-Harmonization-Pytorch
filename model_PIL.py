@@ -21,7 +21,7 @@ device = torch.device("cuda:0")
 
 content_layers_default = ['relu_9']  # conv_4
 # style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
-style_layers_default = ['relu_5', 'relu_9', 'relu_13']
+style_layers_default = ['relu_5', 'relu_9','relu_13']
 
 
 class Normalization(nn.Module):

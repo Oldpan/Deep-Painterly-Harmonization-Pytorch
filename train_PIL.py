@@ -229,18 +229,19 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
 # 第一张图 s_w: 200 c_w:8
 # s15 c0.5 s20 c0.5 s20 c1
 if __name__ == '__main__':
-    style_weights = [0.1, 0.5, 1, 1.5, 2.5, 5, 10, 15, 20, 50, 100, 150, 200, 500, 1000,
-                     5000, 10000, 50000, 100000, 500000, 1000000]
-    content_weights = [1, 5, 10, 100]
+    # style_weights = [10, 15, 20, 50, 100, 150, 200, 500, 1000,
+    #                  5000, 10000, 50000, 100000, 500000, 1000000]
+    # content_weights = [1, 5, 10, 100]
 
-    style_weights_rd = list(np.random.randint(4000, 7000, size=20))
+    style_weights_rd = list(np.random.randint(10000, 100000, size=10))
     content_weights_rd = list(np.random.randint(1, 10, size=5))
 
     for i in range(len(content_weights_rd)):
         for j in range(len(style_weights_rd)):
             output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
                                             content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-                                            style_weight=int(style_weights_rd[j]), content_weight=int(content_weights_rd[i]), lr=1)
+                                            style_weight=int(style_weights_rd[j]),
+                                            content_weight=int(content_weights_rd[i]), lr=0.5)
 
     # since = time.time()
     # output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,

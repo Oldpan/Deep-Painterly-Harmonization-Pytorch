@@ -90,14 +90,6 @@ def tensor_to_PIL(tensor):
     return image
 
 
-def pack_to_cu(tensor):
-    tensor.squeeze_(0)
-
-
-def unpack(tensor):
-    tensor.unsqueeze_(0)
-
-
 def imshow(tensor, title=None):
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
@@ -392,8 +384,6 @@ while i >= 0:
         print("Initializing NNF in layer ", i, ":", name, "with patch", 3)
         print("Brute-force patch matching...")
 
-        pack_to_cu(N_A)
-        pack_to_cu(N_BP)
         init_corr = N_A.clone().int()
         print('N_A', N_A.size())
         print('N_BP', N_BP.size())
@@ -402,7 +392,7 @@ while i >= 0:
 
         print('init_corr', init_corr.size())
 
-        resize = transforms.Resize((h, w))
+        # resize = transforms.Resize((h, w))
         guide = resize(tensor_to_PIL(style_image))
         guide = PIL_to_tensor(guide)
         print('guide', guide.size())
@@ -411,8 +401,8 @@ while i >= 0:
         corr = init_corr.clone()   # int32
         mask = init_corr.clone()   # int32
         # 因为tmask为 (1,1,xxx,xxx) 要变成 (xxx,xxx)
-        pack_to_cu(tmask)
-        pack_to_cu(tmask)
+
+        # 需要修改
         cu.refineNNF(N_A, N_BP, init_corr, guide, tmask, corr, 5, 1)
         cu.Ring2(N_A, N_BP, corr, mask, 1, tmask)
 
@@ -420,8 +410,6 @@ while i >= 0:
         print('mask', mask.size())
         curr_corr = corr
         curr_mask = mask
-
-        unpack(curr_mask)
 
     else:
         print('Upsampling NNF in layer', i, ':', name)

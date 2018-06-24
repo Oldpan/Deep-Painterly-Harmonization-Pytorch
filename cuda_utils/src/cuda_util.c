@@ -37,9 +37,9 @@ int upsample_corr(THCudaIntTensor *curr_corrAB, int next_h, int next_w, THCudaIn
 int refineNNF(THCudaTensor* N_A, THCudaTensor *N_BP, THCudaIntTensor *init_corr,
               THCudaTensor* guide, THCudaIntTensor *tmask, THCudaIntTensor* corr, int patch, int niter)
 {
-	int c = THCudaTensor_size(state, N_BP, 0);
-	int h = THCudaTensor_size(state, N_BP, 1);
-	int w = THCudaTensor_size(state, N_BP, 2);
+	int c = THCudaTensor_size(state, N_BP, 1);
+	int h = THCudaTensor_size(state, N_BP, 2);
+	int w = THCudaTensor_size(state, N_BP, 3);
 
 	corr = THCudaIntTensor_new(state);
 	THCudaIntTensor_resize3d(state, corr, h, w, 2);
@@ -72,15 +72,16 @@ int refineNNF(THCudaTensor* N_A, THCudaTensor *N_BP, THCudaIntTensor *init_corr,
 
 
 int patchmatch(THCudaTensor* input, THCudaTensor* target,
-                THCudaIntTensor* correspondence, int patch)
+                THCudaIntTensor* output, int patch)
 {
-	int c1 = THCudaTensor_size(state, input, 0);
-	int h1 = THCudaTensor_size(state, input, 1);
-	int w1 = THCudaTensor_size(state, input, 2);
 
-	int c2 = THCudaTensor_size(state, target, 0);
-	int h2 = THCudaTensor_size(state, target, 1);
-	int w2 = THCudaTensor_size(state, target, 2);
+	int c1 = THCudaTensor_size(state, input, 1);
+	int h1 = THCudaTensor_size(state, input, 2);
+	int w1 = THCudaTensor_size(state, input, 3);
+
+	int c2 = THCudaTensor_size(state, target, 1);
+	int h2 = THCudaTensor_size(state, target, 2);
+	int w2 = THCudaTensor_size(state, target, 3);
 
 	THCudaTensor *conv = THCudaTensor_new(state);
 	THCudaTensor_resize2d(state, conv, h1*w1, h2*w2);
@@ -98,10 +99,10 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 		h2, w2
 	);
 
-    int *init_corr = THCudaIntTensor_data(state, correspondence);
+    int *init_corr = THCudaIntTensor_data(state, output);
 //	correspondence = THCudaIntTensor_new(state);
-	THCudaIntTensor_resize3d(state, correspondence, h1, w1, 2);  //** look at the size (h1,w1,2)
-	THCudaIntTensor_zero(state, correspondence);
+	THCudaIntTensor_resize3d(state, output, h1, w1, 2);  //** look at the size (h1,w1,2)
+	THCudaIntTensor_zero(state, output);
 
 
     patchmatch_argmax_kernel_L(
