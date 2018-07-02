@@ -16,14 +16,13 @@ import matplotlib.pyplot as plt
 
 import torchvision.transforms as transforms
 
-from utils import show_from_cv, toTensor, tensor_to_np, show_from_tensor
 from model_PIL import get_model_and_losses
 
 parser = argparse.ArgumentParser(description='DeepFake-Pytorch')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
-parser.add_argument('--epochs', type=int, default=10000, metavar='N',
-                    help='number of epochs to train (default: 10000)')
+parser.add_argument('--epochs', type=int, default=1000, metavar='N',
+                    help='number of epochs to train (default: 1000)')
 parser.add_argument('--no-cuda', action='store_true',
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=222, metavar='S',
@@ -95,18 +94,25 @@ def save_image(tensor, **para):
 
 
 print('===> Loaing datasets')
-style_image = image_loader("datasets/0_target.jpg")
-content_image = image_loader("datasets/0_naive.jpg")
-mask_image = image_loader('datasets/0_c_mask_dilated.jpg')[:, 0:1, :, :]
+style_image = image_loader("datasets/3_target.jpg")
+content_image = image_loader("datasets/3_naive.jpg")
+mask_image = image_loader('datasets/3_c_mask_dilated.jpg')[:, 0:1, :, :]
+# mask_image[mask_image > 0] = 1
 mask_image_ori = mask_image.clone()
-tmask_image = Image.open('datasets/0_c_mask.jpg').convert('RGB')
+tmask_image = Image.open('datasets/3_c_mask.jpg').convert('RGB')
 tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
 tmask_image = PIL_to_tensor(tmask_image)
+# tmask_image[tmask_image > 0] = 1
 tmask_image_ori = tmask_image.clone()
 
 unloader = transforms.ToPILImage()  # reconvert into PIL image
 
 plt.ion()
+
+print('content image size', content_image.size())
+print('styke image size', style_image.size())
+print('mask image size', mask_image.size())
+print('tmask image size', tmask_image.size())
 
 # plt.figure()
 # imshow(style_image, title='Style Image')
@@ -139,33 +145,14 @@ def get_input_optimizer(input_img, lr):
     return optimizer
 
 
-def model_hook(module, grad_input, grad_output):
-    mask = mask_image_ori.clone()
-
-    print('grad_input:{} is matchable with mask:{}'.format(grad_input[0].shape, mask.shape))
-    if isinstance(mask, torch.Tensor):
-        mask = tensor_to_PIL(mask)
-    resize = transforms.Resize((math.floor(grad_input[0].shape[2] / 2), math.floor(grad_input[0].shape[3] / 2)))
-    mask = resize(mask)
-    mask = PIL_to_tensor(mask).to(device)
-
-    if grad_input[0].shape == mask.shape:
-        print('grad_input:{} is matchable with mask:{}'.format(grad_input[0].shape, mask.shape))
-        mask = mask.expand_as(grad_input[0])
-        grad_input_1 = grad_input[0] * mask
-        grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
-
-    return grad_input
-
-
 def run_painterly_transfer(cnn, normalization_mean, normalization_std,
-                           style_img, content_img, mask_img, tmask_img, num_steps=1000,
-                           style_weight=0.01, content_weight=1, tv_weight=0, lr=1):
+                           style_img, content_img, mask_img, tmask_img, num_steps=700,
+                           style_weight=100, content_weight=5, tv_weight=0, lr=1):
     print('===> Building the painterly model...')
     model, style_loss, content_loss, tv_loss = get_model_and_losses(cnn, normalization_mean, normalization_std,
                                                                     style_img, content_img, mask_img, tmask_img,
                                                                     style_weight, content_weight, tv_weight)
-    # model.register_backward_hook(model_hook)
+
     optimizer = get_input_optimizer(input_img, lr=lr)
 
     print('===> Optimizer running...')
@@ -214,10 +201,8 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
                         'style_loss': style_score.item()}
 
                 save_image(new_image, **para)
-                # plt.figure()
-                # imshow(new_image, title='new Image')
 
-            return style_score + content_score
+            return loss
 
         optimizer.step(closure)
 
@@ -233,22 +218,22 @@ if __name__ == '__main__':
     #                  5000, 10000, 50000, 100000, 500000, 1000000]
     # content_weights = [1, 5, 10, 100]
 
-    style_weights_rd = list(np.random.randint(10000, 100000, size=10))
-    content_weights_rd = list(np.random.randint(1, 10, size=5))
+    # style_weights_rd = list(np.random.randint(10000, 1000000, size=10))
+    # content_weights_rd = list(np.random.randint(1, 10, size=5))
+    # #
+    # for i in range(len(content_weights_rd)):
+    #     for j in range(len(style_weights_rd)):
+    #         output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
+    #                                         content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
+    #                                         style_weight=int(style_weights_rd[j]),
+    #                                         content_weight=int(content_weights_rd[i]), lr=1)
 
-    for i in range(len(content_weights_rd)):
-        for j in range(len(style_weights_rd)):
-            output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
-                                            content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-                                            style_weight=int(style_weights_rd[j]),
-                                            content_weight=int(content_weights_rd[i]), lr=0.5)
-
-    # since = time.time()
-    # output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
-    #                                 content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
-    #                                 num_steps=1000,
-    #                                 style_weight=200, content_weight=7, tv_weight=0, lr=1)
-    # time_elapsed = time.time() - since
-    # print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    since = time.time()
+    output = run_painterly_transfer(cnn, cnn_normalization_mean, cnn_normalization_std, style_img=style_image,
+                                    content_img=content_image, mask_img=mask_image, tmask_img=tmask_image,
+                                    num_steps=1000,
+                                    style_weight=10, content_weight=1, tv_weight=0, lr=1)
+    time_elapsed = time.time() - since
+    print('The time used is {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
     pass

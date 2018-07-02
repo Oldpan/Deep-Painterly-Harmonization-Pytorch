@@ -1,14 +1,10 @@
 import math
-import copy
 
 import torch
 import cv2
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-
-from PIL import Image, ImageFilter
-import matplotlib.pyplot as plt
 
 import cuda_utils._ext.cuda_util as cu
 import torchvision.transforms as transforms
@@ -19,9 +15,8 @@ import matplotlib.pyplot as plt
 
 device = torch.device("cuda:0")
 
-content_layers_default = ['relu_9']  # conv_4
-# style_layers_default = ['conv_3', 'conv_4', 'conv_5', 'conv_6']
-style_layers_default = ['relu_5', 'relu_9','relu_13']
+content_layers_default = ['relu_9']
+style_layers_default = ['relu_5', 'relu_9', 'relu_13']
 
 
 class Normalization(nn.Module):
@@ -83,9 +78,8 @@ def gram_matrix(input):
 
     G = torch.mm(features, features.t())
 
-    # we 'normalize' the values of the gram matrix
-    # by dividing by the number of element in each feature maps.
-    return G.div(a * b * c * d)
+    # return G.div(a * b * c * d)
+    return G
 
 
 class ContentLoss(nn.Module):
@@ -98,31 +92,20 @@ class ContentLoss(nn.Module):
         self.loss = 0
 
     def forward(self, input):
-        self.loss = F.mse_loss(input, self.target) * self.weight
+        mask = self.mask.clone().expand_as(input)
+        self.loss = F.mse_loss(input*mask, self.target) * self.weight
+        # self.loss = self.loss / (input.size(1) * mask.sum())
+
         return input
 
     def content_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
 
-        # print('Inside ' + module.__class__.__name__ + ' backward')
-        #
-        # print('grad_input size:', grad_input[0].size())
-        # print('grad_output size:', grad_output[0].size())
-        # assert grad_input[0].shape == self.mask.shape, \
-        #     'grad_input:{} is not matchable with mask:{}'.format(grad_input[0].shape, self.mask.shape)
-
-        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
-        # grad_input_1 = grad_input_1 * self.weight
-        # grad_input_1 = grad_input_1 * mask
-        # grad_input = tuple([grad_input_1])
-
-        # plt.figure()
-        # imshow(mask, title='Content hook Image')
-
-        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
-        grad_input_1 = grad_input[0] * self.weight
+        grad_input_1 = grad_input[0]
         grad_input_1 = grad_input_1 * mask
+        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         # grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
+        # grad_input_1 = grad_input_1 * self.weight
         grad_input = tuple([grad_input_1])
         return grad_input
 
@@ -131,52 +114,32 @@ class StyleLoss(nn.Module):
 
     def __init__(self, target, mask, weight):
         super(StyleLoss, self).__init__()
-        self.target = gram_matrix(target).detach()
+        self.target = target.detach()
         self.mask = mask.clone()
         self.weight = weight
         self.loss = 0
 
     def forward(self, input):
         mask = self.mask.clone().expand_as(input)
-        # mask = self.mask.clone()[:, 0:1, :, :]
-
-        # assert section
-        # assert input.size()[:] == self.mask.size()[:], \
-        #     'the input-size:{} is not matchable with mask-size:{}'.format(input.size()[2:], self.mask.size()[2:])
 
         G = gram_matrix(input * mask)
-        # G.div(mask.sum())
+        # G = G.div(mask.sum())
         # self.target = self.target.div(mask.sum())
         self.loss = F.mse_loss(G, self.target) * self.weight
-        #
-        # G = gram_matrix(input)
-        # self.loss = F.mse_loss(G, self.target) * self.weight
 
         return input
 
     def style_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
 
-        # print('Inside ' + module.__class__.__name__ + ' backward')
-        #
-        # print('grad_input size:', grad_input[0].size())
-        # print('grad_output size:', grad_output[0].size())
+        grad_input_1 = grad_input[0]
+        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 2) + 1e-8)
 
-        # assert grad_input[0].shape == self.mask.shape, \
-        #     'grad_input:{} is not matchable with mask:{}'.format(grad_input[0].shape, self.mask.shape)
-
-        # plt.figure()
-        # imshow(mask, title='Style hook Image')
-
-        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
-        grad_input_1 = grad_input[0] * self.weight
         grad_input_1 = grad_input_1 * mask
 
         # grad_input = tuple([grad_input_1, grad_input[1], grad_input[2]])
 
-        # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         # grad_input_1 = grad_input_1 * self.weight
-        # grad_input_1 = grad_input_1 * mask
         grad_input = tuple([grad_input_1])
         return grad_input
 
@@ -212,33 +175,33 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
         model.add_module('tv_loss', tv_loss)
 
     i = 0
+    j = 1
     for layer in cnn.children():
 
         if isinstance(layer, nn.Conv2d):
+            i += 1
+            name = "conv_" + str(i)
             sap = nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
             if not isinstance(mask_image, torch.Tensor):
                 mask_image = PIL_to_tensor(mask_image).to(device)
             mask_image = sap(mask_image).clone()
 
-            # plt.figure()
-            # imshow(mask_image, title='sap Image')
-
-            i += 1
-            name = "conv_" + str(i)
             model.add_module(name, layer)
 
         # why every time we resize the mask image to a smaller image,
         # because later we need mask image to fit input image in deep layers
         # vgg19 only shrink image size in pooling layer and the rate is 1/2!
         elif isinstance(layer, nn.MaxPool2d):
+            name = "pool_" + str(j)
             if isinstance(mask_image, torch.Tensor):
                 mask_image = tensor_to_PIL(mask_image)
             resize = transforms.Resize((math.floor(mask_image.height / 2), math.floor(mask_image.width / 2)))
             mask_image = resize(mask_image)
             mask_image = PIL_to_tensor(mask_image).to(device)
+            print('mask image size {} after {}'.format(mask_image.size(), name))
 
-            name = "pool_" + str(i)
             model.add_module(name, layer)
+            j += 1
 
         elif isinstance(layer, nn.ReLU):
             name = "relu_" + str(i)
@@ -247,6 +210,10 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
         if name in content_layers:
             print('-----Setting up content {} layer-----'.format(name))
             target = model(content_img).clone()
+
+            mask = mask_image.clone()
+            mask = mask.expand_as(target)
+            target = target * mask
 
             content_loss = ContentLoss(target, mask_image, content_weight)
             content_loss.register_backward_hook(content_loss.content_hook)
@@ -263,12 +230,14 @@ def get_model_and_losses(cnn, normalization_mean, normalization_std,
 
                 mask = mask_image.clone()
                 mask = mask.expand_as(target_feature)
-
                 match = input_feature.clone()
 
                 cu.patchmatch_r(input_feature, target_feature, match, 3, 1)
 
+                print('match size at style {} layer'.format(name), match.size())
                 match = match * mask
+                match = gram_matrix(match)
+                # match = match.div(mask.sum())
                 style_loss = StyleLoss(match, mask_image, style_weight)
 
             else:
@@ -297,81 +266,3 @@ def original_color(content, generated):
     content_uv = cv2.cvtColor(content, cv2.COLOR_BGR2YUV)[:, :, 1:2]
     combined_image = cv2.cvtColor(np.stack((generated_y, content_uv), 1), cv2.COLOR_YUV2BGR)
     return combined_image
-
-
-def histogram_match(input, target, patch, stride):
-    n1, c1, h1, w1 = input.size()
-    n2, c2, h2, w2 = target.size()
-    input.resize_(h1 * w1 * h2 * w2)
-    target.resize_(h2 * w2 * h2 * w2)
-    conv = torch.tensor((), dtype=torch.float32)
-    conv = conv.new_zeros((h1 * w1, h2 * w2))
-    conv.resize_(h1 * w1 * h2 * w2)
-    assert c1 == c2, 'input:c{} is not equal to target:c{}'.format(c1, c2)
-
-    size1 = h1 * w1
-    size2 = h2 * w2
-    N = h1 * w1 * h2 * w2
-    print('N is', N)
-
-    for i in range(0, N):
-        i1 = i / size2
-        i2 = i % size2
-        x1 = i1 % w1
-        y1 = i1 / w1
-        x2 = i2 % w2
-        y2 = i2 / w2
-        kernal_radius = int((patch - 1) / 2)
-
-        conv_result = 0
-        norm1 = 0
-        norm2 = 0
-        dy = -kernal_radius
-        dx = -kernal_radius
-        while dy <= kernal_radius:
-            while dx <= kernal_radius:
-                xx1 = x1 + dx
-                yy1 = y1 + dy
-                xx2 = x2 + dx
-                yy2 = y2 + dy
-                if 0 <= xx1 < w1 and 0 <= yy1 < h1 and 0 <= xx2 < w2 and 0 <= yy2 < h2:
-                    _i1 = yy1 * w1 + xx1
-                    _i2 = yy2 * w2 + xx2
-                    for c in range(0, c1):
-                        term1 = input[int(c * size1 + _i1)]
-                        term2 = target[int(c * size2 + _i2)]
-                        conv_result += term1 * term2
-                        norm1 += term1 * term1
-                        norm2 += term2 * term2
-                dx += stride
-            dy += stride
-        norm1 = math.sqrt(norm1)
-        norm2 = math.sqrt(norm2)
-        conv[i] = conv_result / (norm1 * norm2 + 1e-9)
-
-    match = torch.tensor((), dtype=torch.float32)
-    match = match.new_zeros(input.size())
-
-    correspondence = torch.tensor((), dtype=torch.int16)
-    correspondence.new_zeros((h1, w1, 2))
-    correspondence.resize_(h1 * w1 * 2)
-
-    for id1 in range(0, size1):
-        conv_max = -1e20
-        for y2 in range(0, h2):
-            for x2 in range(0, w2):
-                id2 = y2 * w2 + x2
-                id = id1 * size2 + id2
-                conv_result = conv[id1]
-
-                if conv_result > conv_max:
-                    conv_max = conv_result
-                    correspondence[id1 * 2 + 0] = x2
-                    correspondence[id1 * 2 + 1] = y2
-
-                    for c in range(0, c1):
-                        match[c * size1 + id1] = target[c * size2 + id2]
-
-    match.resize_((n1, c1, h1, w1))
-
-    return match, correspondence

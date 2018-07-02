@@ -16,7 +16,6 @@ THCudaTensor *new_tensor_like(THCState *state, THCudaTensor *x)
 
 int upsample_corr(THCudaIntTensor *curr_corrAB, int next_h, int next_w, THCudaIntTensor *next_corrAB)
 {
-    next_corrAB = THCudaIntTensor_new(state);
 
 	THCudaIntTensor_resize3d(state, next_corrAB, next_h, next_w, 2);
 	THCudaIntTensor_zero(state, next_corrAB);
@@ -37,11 +36,11 @@ int upsample_corr(THCudaIntTensor *curr_corrAB, int next_h, int next_w, THCudaIn
 int refineNNF(THCudaTensor* N_A, THCudaTensor *N_BP, THCudaIntTensor *init_corr,
               THCudaTensor* guide, THCudaIntTensor *tmask, THCudaIntTensor* corr, int patch, int niter)
 {
+
 	int c = THCudaTensor_size(state, N_BP, 1);
 	int h = THCudaTensor_size(state, N_BP, 2);
 	int w = THCudaTensor_size(state, N_BP, 3);
 
-	corr = THCudaIntTensor_new(state);
 	THCudaIntTensor_resize3d(state, corr, h, w, 2);
 	THCudaIntTensor_zero(state, corr);
 
@@ -100,7 +99,6 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 	);
 
     int *init_corr = THCudaIntTensor_data(state, output);
-//	correspondence = THCudaIntTensor_new(state);
 	THCudaIntTensor_resize3d(state, output, h1, w1, 2);  //** look at the size (h1,w1,2)
 	THCudaIntTensor_zero(state, output);
 
@@ -123,8 +121,6 @@ int patchmatch(THCudaTensor* input, THCudaTensor* target,
 int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
                 THCudaTensor* output, int patch, int stride)
 {
-    float *input_features = THCudaTensor_data(state, input);
-    float *target_features = THCudaTensor_data(state, target);
     float *match = THCudaTensor_data(state, output);
 
     int c1 = THCudaTensor_size(state, input, 1);
@@ -144,8 +140,8 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
     cudaStream_t stream = THCState_getCurrentStream(state);
 
 	patchmatch_r_conv_kernel_L(
-	    input_features,
-		target_features,
+	    THCudaTensor_data(state, input),
+		THCudaTensor_data(state, target),
 		THCudaTensor_data(state, conv),
 		patch, stride,
 		c1,
@@ -162,7 +158,7 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
 
 	patchmatch_r_argmax_kernel_L(
 		THCudaTensor_data(state, conv),
-		target_features,
+		THCudaTensor_data(state, target),
 		match,
 		THCudaIntTensor_data(state, correspondence),
 		c1,
@@ -180,11 +176,12 @@ int patchmatch_r(THCudaTensor* input, THCudaTensor* target,
 int Ring2(THCudaTensor *A, THCudaTensor *BP, THCudaIntTensor *corrAB, THCudaIntTensor *m, int ring, THCudaIntTensor *mask)
 {
 
-	int c = THCudaTensor_size(state, A, 0);
-	int h = THCudaTensor_size(state, A, 1);
-	int w = THCudaTensor_size(state, A, 2);
+//    int *m = THCudaTensor_data(state, m);
 
-	m = THCudaIntTensor_new(state);
+	int c = THCudaTensor_size(state, A, 1);
+	int h = THCudaTensor_size(state, A, 2);
+	int w = THCudaTensor_size(state, A, 3);
+
 	THCudaIntTensor_resize2d(state, m, h, w);
 	THCudaIntTensor_zero(state, m);
 
@@ -203,13 +200,13 @@ int Ring2(THCudaTensor *A, THCudaTensor *BP, THCudaIntTensor *corrAB, THCudaIntT
 }
 
 int hist_remap2(THCudaTensor *I, int nI, THCudaTensor *mI, THCudaTensor *histJ, THCudaTensor *cumJ, THCudaTensor *minJ,
-                THCudaTensor* maxJ,
-                int nbins,THCudaTensor *sortI, THCudaIntTensor *idxI, THCudaTensor *R)
+                THCudaTensor * maxJ,
+                int nbins, THCudaTensor *sortI, THCudaIntTensor *idxI, THCudaTensor *R)
 {
 
-	int c = THCudaTensor_size(state, I, 0);
-	int h = THCudaTensor_size(state, I, 1);
-	int w = THCudaTensor_size(state, I, 2);
+	int c = THCudaTensor_size(state, I, 1);
+	int h = THCudaTensor_size(state, I, 2);
+	int w = THCudaTensor_size(state, I, 3);
 
 	hist_remap2_kernel_L(
 		THCudaTensor_data(state, I),
@@ -226,7 +223,6 @@ int hist_remap2(THCudaTensor *I, int nI, THCudaTensor *mI, THCudaTensor *histJ, 
 		c, h, w
 	);
 
-
 	return 0;
 }
 
@@ -234,11 +230,10 @@ int hist_remap2(THCudaTensor *I, int nI, THCudaTensor *mI, THCudaTensor *histJ, 
 int histogram(THCudaTensor *I, int nbins, THCudaTensor *minI, THCudaTensor *maxI,
               THCudaTensor *mask, THCudaTensor *hist)
 {
-	int c = THCudaTensor_size(state, I, 0);
-	int h = THCudaTensor_size(state, I, 1);
-	int w = THCudaTensor_size(state, I, 2);
+	int c = THCudaTensor_size(state, I, 1);
+	int h = THCudaTensor_size(state, I, 2);
+	int w = THCudaTensor_size(state, I, 3);
 
-	hist = THCudaTensor_new(state);
 	THCudaTensor_resize2d(state, hist, c, nbins);
 	THCudaTensor_zero(state, hist);
 
@@ -257,10 +252,6 @@ int histogram(THCudaTensor *I, int nbins, THCudaTensor *minI, THCudaTensor *maxI
 int my_add(THCudaIntTensor* a, THCudaIntTensor *b, THCudaIntTensor *c)
 {
     int n = THCudaIntTensor_size(state, a, 0);
-
-    int *aa = THCudaIntTensor_data(state, a);
-    int *bb = THCudaIntTensor_data(state, b);
-    int *cc = THCudaIntTensor_data(state, c);
 
 //    cudaStream_t stream = THCState_getCurrentStream(state);
 
