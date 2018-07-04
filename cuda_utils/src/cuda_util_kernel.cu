@@ -13,7 +13,8 @@
 
 
 #define TB 256
-#define EPS 0.1
+// EPS:0.1 --> EPS:0.01
+#define EPS 0.01
 
 #undef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -93,7 +94,7 @@ __global__ void hist_remap2_kernel(
 			float cdf_e = m == nbins - 1 ?
 						  cumJ[dc * nbins + m] + 0.5f :
 						  cumJ[dc * nbins + m];
-			float cdf_s = m == 0         ?
+			float cdf_s = m == 0  ?
 						  -0.5f :
 						  cumJ[dc * nbins + m - 1];
 
@@ -615,8 +616,10 @@ int hist_remap2_kernel_L
 	float *sortI, int *idxI, float *R, int c, int h, int w
 )
 {
-    	hist_remap2_kernel<<<(c*h*w-1)/TB+1, TB>>>
-    	(
+
+	cudaError_t err;
+
+    hist_remap2_kernel<<<(c*h*w-1)/TB+1, TB>>>(
 		I,
 		nI,
 		mI,
@@ -630,6 +633,13 @@ int hist_remap2_kernel_L
 		R,
 		c, h, w
 	);
+
+	err = cudaGetLastError();
+    if(cudaSuccess != err)
+    {
+        fprintf( stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString( err ) );
+        exit( -1 );
+    }
 
 	return 1;
 }

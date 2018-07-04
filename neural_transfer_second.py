@@ -4,6 +4,9 @@ import os
 import gc
 import os.path as osp
 
+import copy
+import sys
+import psutil
 import torch
 import cv2
 import numpy as np
@@ -29,10 +32,25 @@ parser.add_argument('--seed', type=int, default=222, metavar='S',
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 
+
+def memReport():
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+            print(type(obj), obj.size())
+
+
+def cpuStats():
+    print(sys.version)
+    print(psutil.cpu_percent())
+    print(psutil.virtual_memory())  # physical memory usage
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
+    print('memory GB:', memoryUse)
+
+
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
-
-
 
 torch.manual_seed(args.seed)
 if args.cuda:
@@ -52,9 +70,9 @@ style_layers = ['relu_1', 'relu_3', 'relu_5', 'relu_9']
 layers = ['relu_1', 'relu_3', 'relu_5', 'relu_9']
 hist_layers = ['relu_1', 'relu_9']
 
-style_weight = 10
+style_weight = 11
 content_weight = 1
-tv_weight = 0
+tv_weight = 1e-3
 hist_weight = 1
 
 loader = transforms.Compose([
@@ -106,18 +124,25 @@ def save_image(tensor, **para):
 
 
 print('===> Loaing datasets')
+
 style_image = image_loader("datasets/16_target.jpg")
 content_image = image_loader("datasets/16_naive.jpg")
 cnnmrf_image = image_loader("datasets/16_cnnmrf.jpg")
+
 # 这里注意 [:,0:1,:,:] 和 [:,1:,:,:] 的区别
 mask_image = image_loader('datasets/16_c_mask_dilated.jpg')[:, 0:1, :, :]
-# mask_image[mask_image > 0] = 1
+
+# 这里是将所有大于0的而不为1的值全部变为1
+mask_image[mask_image > 0] = 1.0
+
 mask_image_ori = mask_image.clone()
 tmask_image = Image.open('datasets/16_c_mask.jpg').convert('RGB')
 
 tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
 tmask_image = PIL_to_tensor(tmask_image)
-# tmask_image[tmask_image > 0] = 1
+
+# 这里是将所有大于0的而不为1的值全部变为1
+tmask_image[tmask_image > 0] = 1.0
 tmask_image_ori = tmask_image.clone()
 
 print('content image size', content_image.size())
@@ -242,110 +267,73 @@ class TVLoss(nn.Module):
         return input
 
 
-# def select_idx(tensor, idx):
-#     ch = tensor.size(0)
-#     return tensor.view(-1)[idx.view(-1)].view(ch,-1)
-#
-#
-# def remap_hist(x,hist_ref):
-#     ch, n = x.size()
-#     sorted_x, sort_idx = x.data.sort(1)
-#     ymin, ymax = x.data.min(1)[0].unsqueeze(1), x.data.max(1)[0].unsqueeze(1)
-#     hist = hist_ref * n/hist_ref.sum(1).unsqueeze(1)#Normalization between the different lengths of masks.
-#     cum_ref = hist.cumsum(1)
-#     cum_prev = torch.cat([torch.zeros(ch,1).cuda(), cum_ref[:,:-1]],1)
-#     step = (ymax-ymin)/256
-#     rng = torch.arange(1,n+1).unsqueeze(0).cuda()
-#     idx = (cum_ref.unsqueeze(1) - rng.unsqueeze(2) < 0).sum(2).long()
-#     ratio = (rng - select_idx(cum_prev,idx)) / (1e-8 + select_idx(hist,idx))
-#     ratio = ratio.squeeze().clamp(0,1)
-#     new_x = ymin + (ratio + idx.float()) * step
-# #     print(new_x[: , -2:-1].size())
-#     new_x[: , -2:-1] = ymax
-#     _, remap = sort_idx.sort()
-#     new_x = select_idx(new_x,idx)
-#     return new_x
-
-
 class HistLoss(nn.Module):
     def __init__(self, strength, input, target, nbins, maskI, maskJ, mask):
         super(HistLoss, self).__init__()
         self.strength = strength
         self.loss = 0
-        self.nbins = nbins
+        self.nbins = nbins    # the x-axis, pixel
         self.maskI = maskI
         self.nI = maskI.sum()
 
         _, c, h1, w1 = input.size()
         self.msk = self.maskI.float().expand_as(input)
-        self.msk_sub = torch.ones((1, c, h1, w1)).to(device) * (1 - self.msk.float())
-        self.mask = mask.float().expand_as(input)
+        self.msk_sub = torch.ones((1, c, h1, w1)).to(device).float() * (1 - self.msk.float())
+        self.mask = mask.expand_as(input).float()
 
         self.nJ = maskJ.sum()
         _, c, h2, w2 = target.size()
 
-        # print('maskJ', maskJ.size())
-        mJ = maskJ[:, 0:1, :, :, ].expand_as(target)
+        mJ = maskJ.expand_as(target)
         J = target.float()
         _J = J[mJ.byte()].view(c, self.nJ)
-        # print('debug-shape', _J.size())
+
         self.minJ, _ = _J.min(1)
         self.maxJ, _ = _J.max(1)
 
         self.hisJ = J.clone()
 
-        # print('before maskJ size', maskJ.size())
         cu.histogram(target, self.nbins, self.minJ, self.maxJ, maskJ, self.hisJ)  # 返回self.hisJ
-        # print('after maskJ size', maskJ.size())
 
-        # print('hisJ-size',self.hisJ.size())
-        # print('hisJ-type', type(self.hisJ))
         self.hisJ = self.hisJ * (self.nI / self.nJ).float()
         self.cumJ = torch.cumsum(self.hisJ, 1)
 
     def forward(self, input):
-
-        I = input.clone()
-
-        _, c, h1, w1 = I.size()
-        _I = (I * self.msk) - self.msk_sub
-        sortI, idxI = torch.sort(_I.view(1, c, h1 * w1), 2)
-
-        idxI = idxI.int()
-        R = I.clone()
-
-        cu.hist_remap2(I, int(self.nI), self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
-                       self.nbins, sortI, idxI, R)
-
-        self.loss = F.mse_loss(I, R) * self.strength
-
+        self.output = input
         return input
 
     def hist_hook(self, module, grad_input, grad_output):
 
         grad_input_1 = grad_input[0]
+
         grad_input_1 = grad_input_1.expand_as(self.output)
 
-        I = self.output.clone()
+        I = self.output
 
         _, c, h1, w1 = I.size()
         _I = (I * self.msk) - self.msk_sub
+
         sortI, idxI = torch.sort(_I.view(1, c, h1 * w1), 2)
 
         idxI = idxI.int()
-        R = I.clone()
+        R = torch.ones(I.size()).to(device)
 
+        # a problem occurs here..
         cu.hist_remap2(I, int(self.nI), self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
                        self.nbins, sortI, idxI, R)
 
         # 下面这两条语句会引发 不正确的内存访问
         grad_input_1.add_(I)
         grad_input_1.add_(-1, R)
-        # grad_input_1 = grad_input_1 + I - R
+
+        # 将他们放到cpu中也不行
 
         err = grad_input_1.clone()
         err = err.pow(2.0)
-        self.loss = err.sum() * self.strength / self.output.nelement()
+        self.loss = torch.mul(err.sum(), self.strength)
+        self.loss.div_(self.output.nelement())
+
+        # self.loss = err.sum() * self.strength / self.output.nelement()
 
         # magnitude = torch.norm(grad_input_1, 2)
         # grad_input_1 = grad_input_1.div(magnitude + 1e-8) * self.strength
@@ -408,10 +396,12 @@ for layer in cnn.children():
             input_features.append(input)
             target_features.append(target)
 
-            del input
-            del target
+            # del input
+            # del target
 
             layerIdx += 1
+
+# memReport()
 
 print('input_features:', [layer.size() for layer in input_features])
 print('target_features:', [layer.size() for layer in target_features])
@@ -420,7 +410,7 @@ print('target_features:', [layer.size() for layer in target_features])
 #     if isinstance(m, nn.Conv2d):
 #         m.weight = None
 
-del feature_extractor
+# del feature_extractor
 
 
 curr_corr, corr = None, None
@@ -476,7 +466,7 @@ while i >= 0:
         print("  Refining NNF...")
 
         corr = torch.ones(h, w, 2).int().to(device)  # int32
-        mask = torch.ones(h, w).int().to(device)     # int32
+        mask = torch.ones(h, w).int().to(device)  # int32
         # 因为tmask为 (1,1,xxx,xxx) 要变成 (xxx,xxx)
 
         # 需要修改  ** mask 和 corr 初始化问题
@@ -595,7 +585,7 @@ for layer in cnn.children():
         gram_mask = gram_match_masks[next_style_idx]
         gram_msk = gram_mask.float().expand_as(content_target)
         gram_feature = gram_feature * gram_msk
-        gram_feature = gram_feature * torch.sqrt(mask.sum()/gram_msk.sum())
+        gram_feature = gram_feature * torch.sqrt(mask.sum() / gram_msk.sum())
         target_gram = gram_matrix(gram_feature).clone()
 
         # target_gram.div_(gram_mask.sum().float() * c)
@@ -609,13 +599,17 @@ for layer in cnn.children():
 
         if name in hist_layers:
             print('Setting up histogram layer', next_hist_idx, ':', name)
-            # print('mask_image', mask_image[mask_image>0])
+
             maskI = torch.gt(mask_image, 0.01)
+
+            # print('maskI', maskI[maskI > 0])
+            # print('mask_image', mask_image[mask_image > 0])
+
             maskJ = hist_match_masks[next_hist_idx].byte()
             hist_feature = hist_features[next_hist_idx]
 
             loss_model = HistLoss(hist_weight, content_target, hist_feature, 256, maskI, maskJ, mask_image)
-            # loss_model.register_backward_hook(loss_model.hist_hook)
+            loss_model.register_backward_hook(loss_model.hist_hook)
             model.add_module('hist_loss' + str(next_hist_idx), loss_model)
             hist_losses.append(loss_model)
 
@@ -627,9 +621,9 @@ for i in range(len(model) - 1, -1, -1):
 
     model = model[:i]
 
-del cnn
+# del cnn
 
-gc.collect()
+# gc.collect()
 
 
 print(model)
@@ -689,10 +683,9 @@ while run[0] <= 1000:
 
         return loss
 
+
     optimizer.step(closure)
 
 input_img.data.clamp_(0, 1)
 
 pass
-
-
