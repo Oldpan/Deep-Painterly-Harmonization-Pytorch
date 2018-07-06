@@ -200,6 +200,11 @@ def noise_estimate(input):
     return noise
 
 
+my_counter_con = 0
+my_counter_sty = 0
+my_counter_his = 0
+
+
 class ContentLoss(nn.Module):
 
     def __init__(self, target, mask, weight):
@@ -218,6 +223,10 @@ class ContentLoss(nn.Module):
 
     def content_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
+
+        global my_counter_con
+        my_counter_con += 1
+        print('my_counter_con:', my_counter_con)
 
         grad_input_1 = grad_input[0]
         grad_input_1 = grad_input_1 * mask
@@ -245,6 +254,10 @@ class StyleLoss(nn.Module):
 
     def style_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
+
+        global my_counter_sty
+        my_counter_sty += 1
+        print('my_counter_sty:', my_counter_sty)
 
         # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         grad_input_1 = grad_input[0]
@@ -305,7 +318,6 @@ class HistLoss(nn.Module):
     def hist_hook(self, module, grad_input, grad_output):
 
         grad_input_1 = grad_input[0]
-
         grad_input_1 = grad_input_1.expand_as(self.output)
 
         I = self.output
@@ -318,18 +330,24 @@ class HistLoss(nn.Module):
         idxI = idxI.int()
         R = torch.ones(I.size()).to(device)
 
-        # a problem occurs here..
-        cu.hist_remap2(I, int(self.nI), self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
+        nI = int(self.nI)
+
+        global my_counter_his
+        my_counter_his += 1
+        print('my_counter_his:', my_counter_his)
+
+        # # a problem occurs here
+        # 现在存在两个问题，一个是　retain_graph　本来应该不会释放的问题
+        # 另一个是将hist_remap　放到forward中也是不对的
+        cu.hist_remap2(I, nI, self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
                        self.nbins, sortI, idxI, R)
 
-        # 下面这两条语句会引发 不正确的内存访问
         grad_input_1.add_(I)
         grad_input_1.add_(-1, R)
 
-        # 将他们放到cpu中也不行
-
         err = grad_input_1.clone()
         err = err.pow(2.0)
+
         self.loss = torch.mul(err.sum(), self.strength)
         self.loss.div_(self.output.nelement())
 
@@ -667,22 +685,21 @@ while run[0] <= 1000:
             if tv_loss is not None:
                 tv_score = tv_loss.loss
                 print('Content loss : {:4f} Style loss : {:4f} His loss : {:4f} TV loss : {:4f}'.format(
-                    content_score.item(), style_score.item(), his_score, tv_score.item()))
+                    content_score.item(), style_score.item(), his_score.item(), tv_score.item()))
             else:
                 print('Content loss : {:4f} Style loss : {:4f} His loss : {:4f}'.format(
-                    content_score.item(), style_score.item(), his_score))
+                    content_score.item(), style_score.item(), his_score.item()))
 
             new_image = input_img * tmask_image
             new_image += (style_image * (1.0 - tmask_image))
 
             para = {'style_weight': style_weight, 'content_weight': content_weight,
                     'epoch': run[0], 'lr': lr, 'content_loss': content_score.item(),
-                    'style_loss': style_score.item(), 'his_loss': his_score}
+                    'style_loss': style_score.item(), 'his_loss': his_score.item()}
 
             save_image(new_image, **para)
 
         return loss
-
 
     optimizer.step(closure)
 
