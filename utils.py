@@ -4,8 +4,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def log(data, name):
+    print('{} data is:\n'.format(name), data)
+    print('{} size is:'.format(name), data.size())
+    print('{} data(>0):'.format(name), data[data > 0])
+
+
 def toTensor(img):
-    assert type(img) == np.ndarray,'the img type is {}, but ndarry expected'.format(type(img))
+    assert type(img) == np.ndarray, 'the img type is {}, but ndarry expected'.format(type(img))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = torch.from_numpy(img.transpose((2, 0, 1)))
     return img.float().div(255).unsqueeze(0)

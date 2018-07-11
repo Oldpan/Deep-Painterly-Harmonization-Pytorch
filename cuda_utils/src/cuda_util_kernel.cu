@@ -13,8 +13,8 @@
 
 
 #define TB 256
-// EPS:0.1 --> EPS:0.01
-#define EPS 0.01
+
+#define EPS 0.1
 
 #undef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

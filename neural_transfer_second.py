@@ -4,7 +4,6 @@ import os
 import gc
 import os.path as osp
 
-import copy
 import sys
 import psutil
 import torch
@@ -19,6 +18,7 @@ import torch.optim as optim
 from torchvision import models
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
+from utils import log
 
 parser = argparse.ArgumentParser(description='DeepFake-Pytorch')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
@@ -33,20 +33,20 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 
 
-def memReport():
-    for obj in gc.get_objects():
-        if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-            print(type(obj), obj.size())
-
-
-def cpuStats():
-    print(sys.version)
-    print(psutil.cpu_percent())
-    print(psutil.virtual_memory())  # physical memory usage
-    pid = os.getpid()
-    py = psutil.Process(pid)
-    memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
-    print('memory GB:', memoryUse)
+# def memReport():
+#     for obj in gc.get_objects():
+#         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+#             print(type(obj), obj.size())
+#
+#
+# def cpuStats():
+#     print(sys.version)
+#     print(psutil.cpu_percent())
+#     print(psutil.virtual_memory())  # physical memory usage
+#     pid = os.getpid()
+#     py = psutil.Process(pid)
+#     memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
+#     print('memory GB:', memoryUse)
 
 
 args = parser.parse_args()
@@ -70,7 +70,7 @@ style_layers = ['relu_1', 'relu_3', 'relu_5', 'relu_9']
 layers = ['relu_1', 'relu_3', 'relu_5', 'relu_9']
 hist_layers = ['relu_1', 'relu_9']
 
-style_weight = 11
+style_weight = 0.0001
 content_weight = 1
 tv_weight = 1e-3
 hist_weight = 1
@@ -94,7 +94,7 @@ def PIL_to_tensor(image):
 
 
 def tensor_to_PIL(tensor):
-    image = tensor.cpu().clone()
+    image = tensor.clone().cpu()
     image = image.squeeze(0)
     image = unloader(image)
     return image
@@ -125,31 +125,29 @@ def save_image(tensor, **para):
 
 print('===> Loaing datasets')
 
-style_image = image_loader("datasets/16_target.jpg")
-content_image = image_loader("datasets/16_naive.jpg")
-cnnmrf_image = image_loader("datasets/16_cnnmrf.jpg")
+style_image = image_loader("temp_floder/size-image_36.jpg")
+content_image = image_loader("temp_floder/size-image_50.jpg")
+cnnmrf_image = image_loader("temp_floder/size-image_14.jpg")
 
 # 这里注意 [:,0:1,:,:] 和 [:,1:,:,:] 的区别
-mask_image = image_loader('datasets/16_c_mask_dilated.jpg')[:, 0:1, :, :]
+mask_image = image_loader('temp_floder/size-image_101.jpg')[:, 0:1, :, :]
 
-# 这里是将所有大于0的而不为1的值全部变为1
-mask_image[mask_image > 0] = 1.0
 
 mask_image_ori = mask_image.clone()
-tmask_image = Image.open('datasets/16_c_mask.jpg').convert('RGB')
+tmask_image = Image.open('temp_floder/size-image_88.jpg').convert('RGB')
 
 tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
+
 tmask_image = PIL_to_tensor(tmask_image)
 
-# 这里是将所有大于0的而不为1的值全部变为1
-tmask_image[tmask_image > 0] = 1.0
+# 这里是将所有大于0的而不为1的值全部变为1　按需要进行修改
 tmask_image_ori = tmask_image.clone()
 
-print('content image size', content_image.size())
-print('cnnmrf image size', cnnmrf_image.size())
-print('styke image size', style_image.size())
-print('mask image size', mask_image.size())
-print('tmask image size', tmask_image.size())
+log(content_image, 'content image')
+log(style_image, 'style image')
+log(cnnmrf_image, 'cmmmrf image')
+log(mask_image, 'mask image')
+log(tmask_image, 'tmask image')
 
 cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
 cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
@@ -224,9 +222,9 @@ class ContentLoss(nn.Module):
     def content_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
 
-        global my_counter_con
-        my_counter_con += 1
-        print('my_counter_con:', my_counter_con)
+        # global my_counter_con
+        # my_counter_con += 1
+        # print('my_counter_con:', my_counter_con)
 
         grad_input_1 = grad_input[0]
         grad_input_1 = grad_input_1 * mask
@@ -255,9 +253,9 @@ class StyleLoss(nn.Module):
     def style_hook(self, module, grad_input, grad_output):
         mask = self.mask.clone().expand_as(grad_input[0])
 
-        global my_counter_sty
-        my_counter_sty += 1
-        print('my_counter_sty:', my_counter_sty)
+        # global my_counter_sty
+        # my_counter_sty += 1
+        # print('my_counter_sty:', my_counter_sty)
 
         # grad_input_1 = grad_input[0].div(torch.norm(grad_input[0], 1) + 1e-8)
         grad_input_1 = grad_input[0]
@@ -280,18 +278,50 @@ class TVLoss(nn.Module):
         return input
 
 
+def select_idx(tensor, idx):
+    ch = tensor.size(0)
+    return tensor.view(-1)[idx.view(-1)].view(ch, -1)
+
+
+def remap_hist(x, hist_ref):
+    ch, n = x.size()
+    sorted_x, sort_idx = x.data.sort(1)
+    ymin, ymax = x.data.min(1)[0].unsqueeze(1), x.data.max(1)[0].unsqueeze(1)
+    hist = hist_ref * n / hist_ref.sum(1).unsqueeze(1)  # Normalization between the different lengths of masks.
+
+    cum_ref = hist.cumsum(1)
+    cum_prev = torch.cat([torch.zeros(ch, 1).cuda(), cum_ref[:, :-1]], 1)
+    step = (ymax - ymin) / 256
+    rng = torch.arange(1, n + 1).unsqueeze(0).to(device)
+    # print(rng[rng>0])
+
+    idx = (cum_ref.unsqueeze(1) - rng.unsqueeze(2) < 0).sum(2).long()
+    ratio = (rng - select_idx(cum_prev, idx)) / (1e-8 + select_idx(hist, idx))
+    ratio = ratio.squeeze().clamp(0, 1)
+    new_x = ymin + (ratio + idx.float()) * step
+    #     print(new_x[: , -2:-1].size())
+    new_x[:, -2:-1] = ymax
+    _, remap = sort_idx.sort()
+    new_x = select_idx(new_x, idx)
+    return new_x
+
+
 class HistLoss(nn.Module):
     def __init__(self, strength, input, target, nbins, maskI, maskJ, mask):
         super(HistLoss, self).__init__()
         self.strength = strength
         self.loss = 0
-        self.nbins = nbins    # the x-axis, pixel
+        self.nbins = nbins  # the x-axis, pixel
         self.maskI = maskI
+        self.maskJ = maskJ
+        self.mask_original = mask
         self.nI = maskI.sum()
 
         _, c, h1, w1 = input.size()
         self.msk = self.maskI.float().expand_as(input)
-        self.msk_sub = torch.ones((1, c, h1, w1)).to(device).float() * (1 - self.msk.float())
+
+        self.msk_sub = torch.ones((1, c, h1, w1)).to(device).float() * (1 - self.msk.float())  # mask部分为０
+
         self.mask = mask.expand_as(input).float()
 
         self.nJ = maskJ.sum()
@@ -308,55 +338,70 @@ class HistLoss(nn.Module):
 
         cu.histogram(target, self.nbins, self.minJ, self.maxJ, maskJ, self.hisJ)  # 返回self.hisJ
 
-        self.hisJ = self.hisJ * (self.nI / self.nJ).float()
+        self.hisJ = self.hisJ * (self.nI.float() / self.nJ.float())
+
         self.cumJ = torch.cumsum(self.hisJ, 1)
 
     def forward(self, input):
+
         self.output = input
+
         return input
 
     def hist_hook(self, module, grad_input, grad_output):
 
-        grad_input_1 = grad_input[0]
-        grad_input_1 = grad_input_1.expand_as(self.output)
-
-        I = self.output
-
-        _, c, h1, w1 = I.size()
-        _I = (I * self.msk) - self.msk_sub
-
-        sortI, idxI = torch.sort(_I.view(1, c, h1 * w1), 2)
-
-        idxI = idxI.int()
-        R = torch.ones(I.size()).to(device)
-
-        nI = int(self.nI)
-
         global my_counter_his
         my_counter_his += 1
-        print('my_counter_his:', my_counter_his)
+        print('my counter in his', my_counter_his)
 
-        # # a problem occurs here
-        # 现在存在两个问题，一个是　retain_graph　本来应该不会释放的问题
-        # 另一个是将hist_remap　放到forward中也是不对的
-        cu.hist_remap2(I, nI, self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
-                       self.nbins, sortI, idxI, R)
+        of = self.output.view(self.output.size(1), -1)
+        mask = self.mask_original.contiguous().view(1, -1)
 
-        grad_input_1.add_(I)
-        grad_input_1.add_(-1, R)
+        of_masked = of * mask
 
-        err = grad_input_1.clone()
-        err = err.pow(2.0)
+        of_masked = torch.cat([of_masked[i][mask[0] >= 0.1].unsqueeze(0) for i in range(of_masked.size(0))])
+        # log(of_masked, 'of_masked')
 
-        self.loss = torch.mul(err.sum(), self.strength)
-        self.loss.div_(self.output.nelement())
+        remap = remap_hist(of_masked, self.hisJ)
 
-        # self.loss = err.sum() * self.strength / self.output.nelement()
+        self.loss = F.mse_loss(of_masked, remap) * self.strength
 
-        # magnitude = torch.norm(grad_input_1, 2)
-        # grad_input_1 = grad_input_1.div(magnitude + 1e-8) * self.strength
-        grad_input_1 = grad_input_1 * self.mask
-        grad_input = tuple([grad_input_1])
+        # grad_input_1 = grad_input[0]
+        # grad_input_1 = grad_input_1.expand_as(self.output)
+        #
+        # I = self.output
+        #
+        # _, c, h1, w1 = I.size()
+        # _I = (I * self.msk) - self.msk_sub
+        #
+        # sortI, idxI = torch.sort(_I.view(1, c, h1 * w1), 2)
+        #
+        # idxI = idxI.int()
+        # R = torch.ones(I.size()).to(device)
+        #
+        # nI = int(self.nI)
+        #
+        # # # a problem occurs here
+        # # 现在存在两个问题，一个是　retain_graph　本来应该不会释放的问题
+        # # 另一个是将hist_remap　放到forward中也是不对的
+        # cu.hist_remap2(I, nI, self.maskI, self.hisJ, self.cumJ, self.minJ, self.maxJ,
+        #                self.nbins, sortI, idxI, R)
+        #
+        # grad_input_1.add_(I)
+        # grad_input_1.add_(-1, R)
+        #
+        # err = grad_input_1.clone()
+        # err = err.pow(2.0)
+        #
+        # self.loss = torch.mul(err.sum(), self.strength)
+        # self.loss.div_(self.output.nelement())
+        #
+        # # self.loss = err.sum() * self.strength / self.output.nelement()
+        #
+        # # magnitude = torch.norm(grad_input_1, 2)
+        # # grad_input_1 = grad_input_1.div(magnitude + 1e-8) * self.strength
+        # grad_input_1 = grad_input_1 * self.mask
+        # grad_input = tuple([grad_input_1])
 
         return grad_input
 
@@ -414,21 +459,15 @@ for layer in cnn.children():
             input_features.append(input)
             target_features.append(target)
 
-            # del input
-            # del target
+            del input
+            del target
+            gc.collect()
 
             layerIdx += 1
 
-# memReport()
 
-print('input_features:', [layer.size() for layer in input_features])
-print('target_features:', [layer.size() for layer in target_features])
-
-# for m in feature_extractor:
-#     if isinstance(m, nn.Conv2d):
-#         m.weight = None
-
-# del feature_extractor
+print('input_features: \n', [layer.size() for layer in input_features])
+print('target_features: \n', [layer.size() for layer in target_features])
 
 
 curr_corr, corr = None, None
@@ -461,7 +500,7 @@ while i >= 0:
 
     # 注意这里使用的是tmask而不是之前使用的mask
     tmask = resize(tensor_to_PIL(tmask_image_ori[:, 0:1, :, :]))
-    tmask = torch.gt(PIL_to_tensor(tmask), 0.01).int()  # int32
+    tmask = torch.gt(PIL_to_tensor(tmask), 0.1).int()  # int32
     assert tmask[tmask > 0] is not None
     # print('tmask > 0', tmask[tmask > 0])
 
@@ -505,13 +544,15 @@ while i >= 0:
 
         curr_mask = resize(tensor_to_PIL(mask.unsqueeze(0).unsqueeze(0).float()))
         curr_mask = PIL_to_tensor(curr_mask).int()
+        log(curr_mask, 'curr mask')
 
     i -= 1
     match_features.append(BP)
     match_masks.append(curr_mask)
 
-print('match_features:', [layer.size() for layer in match_features])
-print('match_masks:', [layer.size() for layer in match_masks])
+
+print('match_features: \n', [layer.size() for layer in match_features])
+print('match_masks: \n', [layer.size() for layer in match_masks])
 
 gram_features, hist_features = [], []
 gram_match_masks, hist_match_masks = [], []
@@ -618,13 +659,10 @@ for layer in cnn.children():
         if name in hist_layers:
             print('Setting up histogram layer', next_hist_idx, ':', name)
 
-            maskI = torch.gt(mask_image, 0.01)
+            maskI = torch.gt(mask_image, 0.1).contiguous()
+            maskJ = hist_match_masks[next_hist_idx].byte().contiguous()
 
-            # print('maskI', maskI[maskI > 0])
-            # print('mask_image', mask_image[mask_image > 0])
-
-            maskJ = hist_match_masks[next_hist_idx].byte()
-            hist_feature = hist_features[next_hist_idx]
+            hist_feature = hist_features[next_hist_idx].contiguous()
 
             loss_model = HistLoss(hist_weight, content_target, hist_feature, 256, maskI, maskJ, mask_image)
             loss_model.register_backward_hook(loss_model.hist_hook)
@@ -700,6 +738,7 @@ while run[0] <= 1000:
             save_image(new_image, **para)
 
         return loss
+
 
     optimizer.step(closure)
 

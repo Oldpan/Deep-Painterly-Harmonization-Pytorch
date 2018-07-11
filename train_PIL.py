@@ -1,17 +1,16 @@
 from __future__ import print_function
 import argparse
-import copy
+
 
 import os.path as osp
 import os
 import time
-import math
-import numpy as np
 import torch
 import torch.optim as optim
 from torchvision import models
 
 from PIL import Image, ImageFilter
+from utils import log
 import matplotlib.pyplot as plt
 
 import torchvision.transforms as transforms
@@ -81,7 +80,7 @@ def imshow(tensor, title=None):
 
 
 def save_image(tensor, **para):
-    num = 13
+    num = 15
     dir = 'results_all/results_{}'.format(num)
     image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
     image = image.squeeze(0)  # remove the fake batch dimension
@@ -97,34 +96,20 @@ print('===> Loaing datasets')
 style_image = image_loader("datasets/3_target.jpg")
 content_image = image_loader("datasets/3_naive.jpg")
 mask_image = image_loader('datasets/3_c_mask_dilated.jpg')[:, 0:1, :, :]
-# mask_image[mask_image > 0] = 1
 mask_image_ori = mask_image.clone()
 tmask_image = Image.open('datasets/3_c_mask.jpg').convert('RGB')
 tmask_image = tmask_image.filter(ImageFilter.GaussianBlur())
 tmask_image = PIL_to_tensor(tmask_image)
-# tmask_image[tmask_image > 0] = 1
 tmask_image_ori = tmask_image.clone()
+
+log(mask_image, 'mask image')
+log(tmask_image, 'tmask image')
 
 unloader = transforms.ToPILImage()  # reconvert into PIL image
 
 plt.ion()
 
-print('content image size', content_image.size())
-print('styke image size', style_image.size())
-print('mask image size', mask_image.size())
-print('tmask image size', tmask_image.size())
 
-# plt.figure()
-# imshow(style_image, title='Style Image')
-#
-# plt.figure()
-# imshow(content_image, title='Content Image')
-#
-# plt.figure()
-# imshow(mask_image, title='Mask Image')
-#
-# plt.figure()
-# imshow(tmask_image, title='t-Mask Image')
 # -------------------------------------------------------------------------
 
 cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
@@ -161,7 +146,7 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
 
         def closure():
 
-            input_img.data.clamp_(0, 1)
+
 
             optimizer.zero_grad()
             model(input_img)
@@ -183,7 +168,7 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
             loss.backward()
 
             run[0] += 1
-            if run[0] % 50 == 0:
+            if run[0] % 100 == 0:
                 print("epoch:{}".format(run))
                 if tv_loss is not None:
                     tv_score = tv_loss.loss
@@ -193,6 +178,7 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
                     print('Content loss : {:4f} Style loss : {:4f}'.format(
                         content_score.item(), style_score.item()))
 
+                input_img.data.clamp_(0, 1)
                 new_image = input_img * tmask_image
                 new_image += (style_img * (1.0 - tmask_img))
 
@@ -206,7 +192,7 @@ def run_painterly_transfer(cnn, normalization_mean, normalization_std,
 
         optimizer.step(closure)
 
-    input_img.data.clamp_(0, 1)
+    # input_img.data.clamp_(0, 1)
 
     return input_img
 
